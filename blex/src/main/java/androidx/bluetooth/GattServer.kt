@@ -37,9 +37,9 @@ import androidx.annotation.RequiresApi
 import androidx.annotation.RequiresPermission
 import androidx.annotation.RestrictTo
 import androidx.annotation.VisibleForTesting
-import com.gateoftruth.blex.GattCharacteristic.Companion.PROPERTY_INDICATE
-import com.gateoftruth.blex.GattCharacteristic.Companion.PROPERTY_NOTIFY
-import com.gateoftruth.blex.GattCommon.UUID_CCCD
+import androidx.bluetooth.GattCharacteristic.Companion.PROPERTY_INDICATE
+import androidx.bluetooth.GattCharacteristic.Companion.PROPERTY_NOTIFY
+import androidx.bluetooth.GattCommon.UUID_CCCD
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.experimental.and

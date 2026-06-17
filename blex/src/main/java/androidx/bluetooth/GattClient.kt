@@ -30,11 +30,11 @@ import androidx.annotation.RequiresApi
 import androidx.annotation.RequiresPermission
 import androidx.annotation.RestrictTo
 import androidx.annotation.VisibleForTesting
-import com.gateoftruth.blex.GattCharacteristic.Companion.PROPERTY_NOTIFY
-import com.gateoftruth.blex.GattCharacteristic.Companion.PROPERTY_WRITE
-import com.gateoftruth.blex.GattCharacteristic.Companion.PROPERTY_WRITE_NO_RESPONSE
-import com.gateoftruth.blex.GattCommon.MAX_ATTR_LENGTH
-import com.gateoftruth.blex.GattCommon.UUID_CCCD
+import androidx.bluetooth.GattCharacteristic.Companion.PROPERTY_NOTIFY
+import androidx.bluetooth.GattCharacteristic.Companion.PROPERTY_WRITE
+import androidx.bluetooth.GattCharacteristic.Companion.PROPERTY_WRITE_NO_RESPONSE
+import androidx.bluetooth.GattCommon.MAX_ATTR_LENGTH
+import androidx.bluetooth.GattCommon.UUID_CCCD
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
