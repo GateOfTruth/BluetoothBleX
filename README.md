@@ -1,2 +1,6 @@
 # BluetoothBleX
-clone from androidx.bluetooth ,for modify
+众所周知，自从AndroidX jetpack蓝牙库发布已经好几年了，但是目前还是在1.0.0-alpha02的版本，而且估计也不会更新了。但是不得不说，Android官方封装的蓝牙库还是好用的，所以我把它的代码复制了一份，增加了一些功能，并发布出来，方便自用和感兴趣的人一起修改完善。同时，我把包名也设置的和Google的一样，这样万一以后Google抽风更新了，直接换一下lib就行了。不存在包名大改的问题。
+# 目前实现的功能
+1. 支持配置MTU
+2. 增加连接断开的时候的回调
+
