@@ -28,6 +28,19 @@ import kotlinx.coroutines.flow.StateFlow
 interface GattClientScope {
 
     /**
+     * A _hot_ [Flow] that emits the [status] when the connection is disconnected.
+     *
+     * The [status] is the same as the status parameter in
+     * [android.bluetooth.BluetoothGattCallback.onConnectionStateChange].
+     *
+     * Note that when this flow emits, the coroutine scope for this connection
+     * will be cancelled shortly after. It's recommended to launch a separate
+     * coroutine to collect this flow within the [BluetoothLe.connectGatt] block
+     * if you need to perform cleanup before the scope is cancelled.
+     */
+    val onDisconnected: Flow<Int>
+
+    /**
      * A flow of GATT services discovered from the remote device.
      *
      * If the services of the remote device has changed, the new services will be

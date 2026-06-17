@@ -36,6 +36,12 @@ class BluetoothLe(context: Context) {
     companion object {
         /** Advertise started successfully. */
         const val ADVERTISE_STARTED: Int = 10100
+
+        /**
+         * The default MTU used when connecting to a GATT server.
+         * This is the maximum ATT size (512) + header (3) = 515.
+         */
+        const val DEFAULT_MTU: Int = GattClient.GATT_MAX_MTU
     }
 
     @Target(
@@ -120,6 +126,8 @@ class BluetoothLe(context: Context) {
      * The block may not be run if connection fails.
      *
      * @param device a [BluetoothDevice] to connect to
+     * @param mtu the MTU to request after connection. The default value is
+     *            [DEFAULT_MTU] (515). The valid range is 23 to 517.
      * @param block a block of code that is invoked after the connection is made
      *
      * @throws CancellationException if connect failed or it's canceled
@@ -130,9 +138,10 @@ class BluetoothLe(context: Context) {
     @RequiresPermission("android.permission.BLUETOOTH_CONNECT")
     suspend fun <R> connectGatt(
         device: BluetoothDevice,
+        mtu: Int = DEFAULT_MTU,
         block: suspend GattClientScope.() -> R
     ): R {
-        return client.connect(device, block)
+        return client.connect(device, mtu, block)
     }
 
     /**

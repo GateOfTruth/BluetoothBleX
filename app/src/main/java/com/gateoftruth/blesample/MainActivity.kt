@@ -26,7 +26,9 @@ class MainActivity : ComponentActivity() {
                     )
                 }
             }
+            BaseBleManager.BlePermissionCheck(this)
         }
+
     }
 }
 

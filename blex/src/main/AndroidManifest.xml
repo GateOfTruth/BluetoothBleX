@@ -1,4 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 2. 蓝牙权限（根据Android版本兼容） -->
+    <!-- 适用于 Android 11 (API 30) 及以下：经典蓝牙权限，安装时自动授予 -->
+    <uses-permission
+        android:name="android.permission.BLUETOOTH"
+        android:maxSdkVersion="30" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_ADMIN"
+        android:maxSdkVersion="30" /> <!-- 适用于 Android 12 (API 31) 及以上：新版运行时权限 -->
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" /> <!-- 3. 位置权限（为了兼容 Android 11 及以下版本的蓝牙扫描需要） -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" /> <!-- 4. 附近WiFi设备权限（Android 13+，如扫描BLE与WiFi扫描联动时使用） -->
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
 
+    <uses-feature
+        android:name="android.hardware.bluetooth_le"
+        android:required="true" />
 </manifest>

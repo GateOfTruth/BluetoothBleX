@@ -69,9 +69,10 @@ class GattClient(private val context: Context) {
         private const val TAG = "GattClient"
 
         /**
-         * The maximum ATT size + header(3)
+         * The maximum ATT size + header(3).
+         * This is the default MTU used when connecting to a GATT server.
          */
-        private const val GATT_MAX_MTU = MAX_ATTR_LENGTH + 3
+        const val GATT_MAX_MTU = MAX_ATTR_LENGTH + 3
 
         private const val CONNECT_TIMEOUT_MS = 30_000L
     }
@@ -140,6 +141,7 @@ class GattClient(private val context: Context) {
     @SuppressLint("MissingPermission")
     suspend fun <R> connect(
         device: BluetoothDevice,
+        mtu: Int = GATT_MAX_MTU,
         block: suspend GattClientScope.() -> R
     ): R = coroutineScope {
         val connectResult = CompletableDeferred<Unit>(parent = coroutineContext.job)
@@ -149,6 +151,7 @@ class GattClient(private val context: Context) {
         val subscribeMutex = Mutex()
         val attributeMap = AttributeMap()
         val servicesFlow = MutableStateFlow<List<GattService>>(listOf())
+        val disconnectedFlow = MutableSharedFlow<Int>(replay = 0, extraBufferCapacity = 1)
 
         val fwkCallback = object : FwkBluetoothGattCallback() {
             override fun onConnectionStateChange(
@@ -157,8 +160,9 @@ class GattClient(private val context: Context) {
                 newState: Int
             ) {
                 if (newState == FwkBluetoothGatt.STATE_CONNECTED) {
-                    fwkAdapter.requestMtu(GATT_MAX_MTU)
+                    fwkAdapter.requestMtu(mtu)
                 } else {
+                    disconnectedFlow.tryEmit(status)
                     cancel("connect failed")
                 }
             }
@@ -297,6 +301,8 @@ class GattClient(private val context: Context) {
                     return block()
                 }
             }
+
+            override val onDisconnected: Flow<Int> = disconnectedFlow
 
             override val servicesFlow: StateFlow<List<GattService>> = servicesFlow.asStateFlow()
 
