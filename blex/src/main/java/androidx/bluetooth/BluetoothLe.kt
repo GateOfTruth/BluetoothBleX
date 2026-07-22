@@ -145,6 +145,29 @@ class BluetoothLe(context: Context) {
     }
 
     /**
+     * 以**长连接**方式连接远端 GATT 服务，返回可复用的 [GattConnection]，**不会**自动关闭。
+     *
+     * 与 [connectGatt] 不同，该方法建立连接后不会在 block 结束时关闭 GATT，而是返回
+     * 一个 [GattConnection] 句柄，调用方可多次调用 [GattConnection.withScope] 复用同一条
+     * GATT 连接，直到主动调用 [GattConnection.close] 才会断开。
+     *
+     * 适合需要频繁与同一设备交互的场景，避免反复建链带来的开销。
+     *
+     * @param device a [BluetoothDevice] to connect to
+     * @param mtu the MTU to request after connection. The default value is
+     *            [DEFAULT_MTU] (515). The valid range is 23 to 517.
+     * @return 已建立并可复用的 [GattConnection]
+     * @throws CancellationException if connect failed or it's canceled
+     */
+    @RequiresPermission("android.permission.BLUETOOTH_CONNECT")
+    suspend fun connectGattLongLived(
+        device: BluetoothDevice,
+        mtu: Int = DEFAULT_MTU
+    ): GattConnection {
+        return client.connectLongLived(device, mtu)
+    }
+
+    /**
      * Opens a GATT server.
      *
      * Only one server at a time can be opened.
