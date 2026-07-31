@@ -34,6 +34,6 @@ dependencyResolutionManagement {
 ```
 然后在app的build.gradle
 ```
-implementation("com.github.GateOfTruth:BluetoothBleX:1.0.0")
+implementation("com.github.GateOfTruth:BluetoothBleX:1.0.4")
 ```
 
