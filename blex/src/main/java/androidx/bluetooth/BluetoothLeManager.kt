@@ -138,14 +138,7 @@ class BluetoothLeManager(private val bluetoothLe: BluetoothLe) {
         snapshot.forEach { it.close() }
     }
 
-    /**
-     * 获取指定设备当前缓存的长连接（可能为 null）。
-     *
-     * 主要用于监听 [GattConnection.onDisconnected] 或查询 [GattConnection.services]。
-     */
-    fun getConnection(device: BluetoothDevice): GattConnection? {
-        return synchronized(connections) { connections[device.id] }
-    }
+
 
     private suspend fun <R> connectLongLived(
         device: BluetoothDevice,

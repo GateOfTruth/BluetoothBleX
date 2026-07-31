@@ -23,6 +23,7 @@ import android.bluetooth.BluetoothGattCallback as FwkBluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic as FwkBluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor as FwkBluetoothGattDescriptor
 import android.bluetooth.BluetoothGattService as FwkBluetoothGattService
+import android.bluetooth.BluetoothProfile as FwkBluetoothProfile
 import android.content.Context
 import androidx.bluetooth.GattCharacteristic.Companion.PROPERTY_NOTIFY
 import androidx.bluetooth.GattCharacteristic.Companion.PROPERTY_WRITE
@@ -138,21 +139,29 @@ class GattConnection internal constructor(
 
     private val servicesFlowImpl = MutableStateFlow<List<GattService>>(listOf())
 
+    /** 连接状态变化的 StateFlow，初始为“连接中”。 */
+    private val connectionStateFlowImpl = MutableStateFlow(
+        ConnectionStateChange(
+            status = FwkBluetoothGatt.GATT_SUCCESS,
+            newState = FwkBluetoothProfile.STATE_CONNECTING
+        )
+    )
+
+    /**
+     * 当前 GATT 连接状态 Flow。
+     *
+     * 每次框架层 `onConnectionStateChange` 回调都会更新该 Flow，
+     * 可在长连接场景下直接 collect 监听连接/断开事件。
+     */
+    val connectionStateFlow: StateFlow<ConnectionStateChange> =
+        connectionStateFlowImpl.asStateFlow()
+
     /** 服务发现结果 Flow，服务变更时会自动重新发现并发射。 */
     val servicesFlow: StateFlow<List<GattService>> = servicesFlowImpl.asStateFlow()
 
     /** 最近一次发现的服务列表。 */
     val services: List<GattService> get() = servicesFlowImpl.value
 
-    private val disconnectedFlow = MutableSharedFlow<Int>(replay = 0, extraBufferCapacity = 1)
-
-    /**
-     * 连接断开时发射事件，携带与
-     * [android.bluetooth.BluetoothGattCallback.onConnectionStateChange] 相同的 status。
-     *
-     * 当该 Flow 发射时，连接即将被关闭，后续 [withScope] 调用会抛出 [CancellationException]。
-     */
-    val onDisconnected: Flow<Int> = disconnectedFlow
 
     /**
      * 连接是否仍处于可用状态（已建立且未被关闭）。
@@ -182,10 +191,12 @@ class GattConnection internal constructor(
             status: Int,
             newState: Int
         ) {
+            // 先把最新连接状态广播出去，供 subscribeToCharacteristic 等订阅方监听。
+            connectionStateFlowImpl.value = ConnectionStateChange(status, newState)
+
             if (newState == FwkBluetoothGatt.STATE_CONNECTED) {
                 fwkAdapter.requestMtu(mtu)
             } else {
-                disconnectedFlow.tryEmit(status)
                 connectionScope.cancel("GATT disconnected (status=$status)")
             }
         }
@@ -361,6 +372,12 @@ class GattConnection internal constructor(
         if (closed) return
         closed = true
         connected = false
+        // 主动关闭后框架层不会再回调 onConnectionStateChange，
+        // 这里手动发射断开状态，保证订阅方能收到通知。
+        connectionStateFlowImpl.value = ConnectionStateChange(
+            status = FwkBluetoothGatt.GATT_SUCCESS,
+            newState = FwkBluetoothProfile.STATE_DISCONNECTED
+        )
         // init 中注册的 invokeOnCompletion 也会再次 closeGatt，幂等，无副作用。
         fwkAdapter.closeGatt()
         connectionScope.cancel("connection closed by user")
@@ -381,10 +398,11 @@ class GattConnection internal constructor(
             }
         }
 
-        override val onDisconnected: Flow<Int> = disconnectedFlow
-
         override val servicesFlow: StateFlow<List<GattService>> =
             this@GattConnection.servicesFlow
+
+        override val connectionStateFlow: StateFlow<ConnectionStateChange> =
+            this@GattConnection.connectionStateFlow
 
         override fun getService(uuid: UUID): GattService? {
             return this@GattConnection.getService(uuid)
@@ -441,7 +459,8 @@ class GattConnection internal constructor(
         }
 
         override fun subscribeToCharacteristic(
-            characteristic: GattCharacteristic
+            characteristic: GattCharacteristic,
+            onConnectionStateChange: ((ConnectionStateChange) -> Unit)?
         ): Flow<ByteArray> {
             if (!characteristic.isSubscribable) {
                 return emptyFlow()
@@ -461,6 +480,22 @@ class GattConnection internal constructor(
                 }
                 if (!registerSubscribeListener(characteristic.fwkCharacteristic, listener)) {
                     throw IllegalStateException("already subscribed")
+                }
+
+                // 监听连接状态变化：
+                // 1. 把每次状态变化（含订阅时的当前状态）回调给调用方；
+                // 2. GATT 断开时主动关闭本 Flow，避免订阅方无限挂起等待通知。
+                launch {
+                    this@GattConnection.connectionStateFlow.collect { state ->
+                        onConnectionStateChange?.invoke(state)
+                        if (state.isDisconnected) {
+                            close(
+                                CancellationException(
+                                    "GATT disconnected (status=${state.status})"
+                                )
+                            )
+                        }
+                    }
                 }
 
                 runTask {
