@@ -114,7 +114,7 @@ class GattCharacteristic internal constructor(
             val cccDescriptor = FwkBluetoothGattDescriptor(
                 GattCommon.UUID_CCCD,
                 FwkBluetoothGattDescriptor.PERMISSION_READ or
-                    FwkBluetoothGattDescriptor.PERMISSION_WRITE
+                        FwkBluetoothGattDescriptor.PERMISSION_WRITE
             )
             fwkCharacteristic.addDescriptor(cccDescriptor)
         }
@@ -142,4 +142,14 @@ class GattCharacteristic internal constructor(
         get() = fwkCharacteristic.permissions
 
     internal var service: GattService? = null
+
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is GattCharacteristic) return false
+        return uuid == other.uuid && fwkCharacteristic.instanceId == other.fwkCharacteristic.instanceId
+    }
+
+    override fun hashCode(): Int = uuid.hashCode() * 31 + fwkCharacteristic.instanceId
+
 }

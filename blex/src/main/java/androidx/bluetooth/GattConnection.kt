@@ -25,6 +25,7 @@ import android.bluetooth.BluetoothGattDescriptor as FwkBluetoothGattDescriptor
 import android.bluetooth.BluetoothGattService as FwkBluetoothGattService
 import android.bluetooth.BluetoothProfile as FwkBluetoothProfile
 import android.content.Context
+import android.util.Log
 import androidx.bluetooth.GattCharacteristic.Companion.PROPERTY_NOTIFY
 import androidx.bluetooth.GattCharacteristic.Companion.PROPERTY_WRITE
 import androidx.bluetooth.GattCharacteristic.Companion.PROPERTY_WRITE_NO_RESPONSE
@@ -40,21 +41,18 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.emptyFlow
-import kotlinx.coroutines.flow.filter
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * 表示一条已建立的 GATT 连接。
@@ -123,9 +121,37 @@ class GattConnection internal constructor(
         parent = connectionScope.coroutineContext.job
     )
 
-    /** GATT 操作（read/write/descriptor）回调结果的广播通道。 */
-    private val callbackResultsFlow =
-        MutableSharedFlow<CallbackResult>(extraBufferCapacity = Int.MAX_VALUE)
+    /** 等待 GATT 操作回调结果的信号机制，先注册再发起，消除发射-订阅竞态。 */
+    private val pendingResultLock = Any()
+    private var pendingRequestKey: Any? = null
+    private var pendingDeferred: CompletableDeferred<CallbackResult>? = null
+
+    private fun registerPending(key: Any): CompletableDeferred<CallbackResult> {
+        val deferred = CompletableDeferred<CallbackResult>()
+        synchronized(pendingResultLock) {
+            pendingRequestKey = key
+            pendingDeferred = deferred
+        }
+        return deferred
+    }
+
+    private fun clearPending() {
+        synchronized(pendingResultLock) {
+            pendingRequestKey = null
+            pendingDeferred = null
+        }
+    }
+
+    private fun tryCompletePending(key: Any, result: CallbackResult): Boolean {
+        synchronized(pendingResultLock) {
+            return if (pendingRequestKey === key && pendingDeferred != null) {
+                pendingDeferred!!.complete(result)
+                true
+            } else {
+                false
+            }
+        }
+    }
 
     /** 特征值通知订阅表，key 为框架层特征值对象。 */
     private val subscribeMap = mutableMapOf<FwkBluetoothGattCharacteristic, SubscribeListener>()
@@ -193,7 +219,6 @@ class GattConnection internal constructor(
         ) {
             // 先把最新连接状态广播出去，供 subscribeToCharacteristic 等订阅方监听。
             connectionStateFlowImpl.value = ConnectionStateChange(status, newState)
-
             if (newState == FwkBluetoothGatt.STATE_CONNECTED) {
                 fwkAdapter.requestMtu(mtu)
             } else {
@@ -229,10 +254,8 @@ class GattConnection internal constructor(
             value: ByteArray,
             status: Int
         ) {
-            attributeMap.fromFwkCharacteristic(fwkCharacteristic)?.let {
-                callbackResultsFlow.tryEmit(
-                    CallbackResult.OnCharacteristicRead(it, value, status)
-                )
+            attributeMap.fromFwkCharacteristic(fwkCharacteristic)?.let { char ->
+                tryCompletePending(fwkCharacteristic, CallbackResult.OnCharacteristicRead(char, value, status))
             }
         }
 
@@ -255,10 +278,8 @@ class GattConnection internal constructor(
             fwkCharacteristic: FwkBluetoothGattCharacteristic,
             status: Int
         ) {
-            attributeMap.fromFwkCharacteristic(fwkCharacteristic)?.let {
-                callbackResultsFlow.tryEmit(
-                    CallbackResult.OnCharacteristicWrite(it, status)
-                )
+            attributeMap.fromFwkCharacteristic(fwkCharacteristic)?.let { char ->
+                tryCompletePending(fwkCharacteristic, CallbackResult.OnCharacteristicWrite(char, status))
             }
         }
 
@@ -268,9 +289,7 @@ class GattConnection internal constructor(
             status: Int,
             value: ByteArray
         ) {
-            callbackResultsFlow.tryEmit(
-                CallbackResult.OnDescriptorRead(fwkDescriptor, value, status)
-            )
+            tryCompletePending(fwkDescriptor, CallbackResult.OnDescriptorRead(fwkDescriptor, value, status))
         }
 
         @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
@@ -287,9 +306,7 @@ class GattConnection internal constructor(
             fwkDescriptor: FwkBluetoothGattDescriptor,
             status: Int
         ) {
-            callbackResultsFlow.tryEmit(
-                CallbackResult.OnDescriptorWrite(fwkDescriptor, status)
-            )
+            tryCompletePending(fwkDescriptor, CallbackResult.OnDescriptorWrite(fwkDescriptor, status))
         }
 
         override fun onCharacteristicChanged(
@@ -415,16 +432,17 @@ class GattConnection internal constructor(
                 return Result.failure(IllegalArgumentException("can't read the characteristic"))
             }
             return runTask {
-                fwkAdapter.readCharacteristic(characteristic.fwkCharacteristic)
-                val res = takeMatchingResult<CallbackResult.OnCharacteristicRead>(
-                    callbackResultsFlow
-                ) {
-                    it.characteristic == characteristic
-                }
+                val deferred = registerPending(characteristic.fwkCharacteristic)
+                try {
+                    fwkAdapter.readCharacteristic(characteristic.fwkCharacteristic)
+                    val res = withTimeout(5.seconds) { deferred.await() } as CallbackResult.OnCharacteristicRead
 
-                if (res.status == FwkBluetoothGatt.GATT_SUCCESS) Result.success(res.value)
-                // TODO: throw precise reason if we can gather the info
-                else Result.failure(CancellationException("fail"))
+                    if (res.status == FwkBluetoothGatt.GATT_SUCCESS) Result.success(res.value)
+                    // TODO: throw precise reason if we can gather the info
+                    else Result.failure(CancellationException("fail"))
+                } finally {
+                    clearPending()
+                }
             }
         }
 
@@ -444,17 +462,18 @@ class GattConnection internal constructor(
             }
 
             return runTask {
-                fwkAdapter.writeCharacteristic(
-                    characteristic.fwkCharacteristic, value, writeType
-                )
-                val res = takeMatchingResult<CallbackResult.OnCharacteristicWrite>(
-                    callbackResultsFlow
-                ) {
-                    it.characteristic == characteristic
+                val deferred = registerPending(characteristic.fwkCharacteristic)
+                try {
+                    fwkAdapter.writeCharacteristic(
+                        characteristic.fwkCharacteristic, value, writeType
+                    )
+                    val res = withTimeout(5.seconds) { deferred.await() } as CallbackResult.OnCharacteristicWrite
+                    if (res.status == FwkBluetoothGatt.GATT_SUCCESS) Result.success(Unit)
+                    // TODO: throw precise reason if we can gather the info
+                    else Result.failure(CancellationException("fail with error = ${res.status}"))
+                } finally {
+                    clearPending()
                 }
-                if (res.status == FwkBluetoothGatt.GATT_SUCCESS) Result.success(Unit)
-                // TODO: throw precise reason if we can gather the info
-                else Result.failure(CancellationException("fail with error = ${res.status}"))
             }
         }
 
@@ -509,11 +528,12 @@ class GattConnection internal constructor(
                             FwkBluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
                         else FwkBluetoothGattDescriptor.ENABLE_INDICATION_VALUE
 
-                    fwkAdapter.writeDescriptor(cccd, cccdValue)
-                    val res = takeMatchingResult<CallbackResult.OnDescriptorWrite>(
-                        callbackResultsFlow
-                    ) {
-                        it.fwkDescriptor == cccd
+                    val deferred = registerPending(cccd)
+                    val res = try {
+                        fwkAdapter.writeDescriptor(cccd, cccdValue)
+                        withTimeout(5.seconds) { deferred.await() } as CallbackResult.OnDescriptorWrite
+                    } finally {
+                        clearPending()
                     }
                     if (res.status != FwkBluetoothGatt.GATT_SUCCESS) {
                         cancel("failed to set notification")
@@ -557,10 +577,4 @@ class GattConnection internal constructor(
         }
     }
 
-    private suspend inline fun <reified R : CallbackResult> takeMatchingResult(
-        flow: SharedFlow<CallbackResult>,
-        crossinline predicate: (R) -> Boolean
-    ): R {
-        return flow.filter { it is R && predicate(it) }.first() as R
-    }
 }
